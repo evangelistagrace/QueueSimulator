@@ -2,8 +2,6 @@ import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Timer;
 import java.util.TimerTask;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
 public class QueueManager {
     private int servingTicketId;
@@ -52,16 +50,15 @@ public class QueueManager {
         QueueManager queueManager = this;
         Ticket nextTicket = this.tickets.peek(); 
         long period = (long)(nextTicket.getTicketTimeInterval() * 1000);
-        // call a completeablefuture here?
-        //then in supplier function, will have timer
+
         newTimer = new Timer();
-        newTimer.schedule(new TicketHelper(queueManager), period, period); //start ticket serving scheduler
+        newTimer.schedule(new TicketHelper(queueManager), 0, period); //start ticket serving scheduler
     }
 
     class TicketHelper extends TimerTask {
         public QueueManager queueManager;
         public Queue<Ticket> tickets;
-        Customer currentServingCustomer = null;
+        Customer customer = null;
 
         public TicketHelper(QueueManager queueManager) {
             this.queueManager = queueManager;
@@ -69,34 +66,44 @@ public class QueueManager {
         }
 
         public void run() { 
-            Ticket nextTicket = this.tickets.peek(); 
-            long period = (long)(nextTicket.getTicketTimeInterval() * 1000);
-            long currentServingTicketNumber = nextTicket.getTicketNumber();
+            Ticket ticket = this.tickets.peek(); 
+            long period = (long)(ticket.getTicketTimeInterval() * 1000);
             
             Timer oldTimer;
-           if (!nextTicket.isExpired()) {
-                System.out.println("Currently serving: " + currentServingTicketNumber);
-                //search queuedCustomers list and if current serving ticket number matches a queuedCustomer's ticket number,
-                //set that queuedCustomer's isInQueue attr to false (setting of alert at the same time) and poll this queuedCustomer from the list
-                for (Customer queuedCustomer: queuedCustomers) {
-                    if (queuedCustomer.getTicket().getTicketNumber() == currentServingTicketNumber) {
-                        currentServingCustomer = queuedCustomer;
-                        System.out.println("SERVING CUSTOMER " + currentServingCustomer.getUsername());
+           if (!ticket.isExpired()) {
+
+                //serve immediately
+                for (Customer queuedCustomer: this.queueManager.queuedCustomers) {
+                    if (queuedCustomer.getTicket().getTicketNumber() == ticket.getTicketNumber()) {
+                        customer = queuedCustomer;
                     }
                 }
 
-                // CompletableFuture.supplyAsync(supplier)
+                if (customer != null) {
+                    System.out.println("Currently serving customer " + customer.getUsername() + " with " + ticket.getTicketNumber());
+                } else {
+                    System.out.println("Currently serving ticket" + ticket.getTicketNumber());
+                }
 
-                CompletableFuture.delayedExecutor(period, TimeUnit.MILLISECONDS).execute(() -> {
-                    // code here executes after {period} seconds
-                    if (currentServingCustomer != null) { // clear customer from queue if got current serving customer
-                        System.out.println("FINISHED SERVING CUSTOMER " + currentServingCustomer.getUsername() + " AFTER " + TimeUnit.MILLISECONDS.toSeconds(period) + " seconds.");
-                        currentServingCustomer.setInQueue(false);
-                        currentServingCustomer.setTicket(null);
-                        queuedCustomers.poll(); //remove current customer from queue
-                    }
-                    nextTicket.setExpired(true); //expire ticket after serving
-                });
+                // DELAY THREAD TO SIMULATE RANDOM SERVING PERIOD //
+                try {
+                    Thread.sleep(period);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+
+                // CONTINUE THREAD EXECUTION //
+
+                if (customer != null) {
+                    System.out.println("Finished serving customer " + customer.getUsername() + " with " + ticket.getTicketNumber());
+                    //remove customer from queue
+                    customer.setInQueue(false);
+                    customer.setTicket(null);
+                    queuedCustomers.poll();
+                } else {
+                    System.out.println("Finished serving " + ticket.getTicketNumber());
+                }
+                ticket.setExpired(true);
                 
            } else {
                 oldTimer = newTimer; //assign previous timer as oldtimer so it can be cancelled and purge after new timer starts
@@ -105,8 +112,6 @@ public class QueueManager {
 
                 if (this.tickets.peek() != null) { //check for remaining tickets
                     newTimer = new Timer(); //instantiate a new timer
-                    // nextTicket = this.tickets.peek(); 
-                    // long period = (long)(nextTicket.getTicketTimeInterval() * 1000);
                     newTimer.schedule(new TicketHelper(this.queueManager), 0, period);
                 } else { //no more tickets left
                     System.out.println("~~ Finished serving all tickets for counter " + this.queueManager.counter.getId() + "~~");
@@ -119,6 +124,7 @@ public class QueueManager {
         } 
     }
 
+    // process that keeps on running
     public void run() {
         this.generateTickets();
         System.out.println("~~Generated new batch of tickets for counter " + this.counter.getId() + " ~~");
@@ -128,10 +134,8 @@ public class QueueManager {
         this.getNextTicket();
     }
 
+    // handle ticket request from customer
     public void handleTicketRequest(Customer customer) {
-        //generate a single ticket for this customer and add to tickets list
-        // add to queuedCustomers list
-        // set this customer's isInQueue attr to true
         Ticket newTicket = this.generateTicket();
         System.out.println("QUEUED CUSTOMER " + customer.getUsername() + " WITH TICKET NUMBER " + newTicket.getTicketNumber());
         customer.setTicket(newTicket);
